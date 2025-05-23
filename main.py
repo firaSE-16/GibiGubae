@@ -345,7 +345,7 @@ def health_check():
 # Main function to set webhook and start Flask
 def main():
     bot.remove_webhook()
-    WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'your-render-app-name.onrender.com')}/{API}"
+    WEBHOOK_URL = f"https://{"gibigubae.onrender.com"}/{API}"
     bot.set_webhook(url=WEBHOOK_URL)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8443)))
 
