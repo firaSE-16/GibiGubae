@@ -31,7 +31,8 @@ star_emoji = "⭐"
 ADMINS_ID = [6473677687]  # Add your Telegram ID
 QUIZ_ACTIVE = False
 CURRENT_QUIZ_USER = None
-user_state = {}  # {user_id: {"current_question": int, "score": int, "start_time": float, "answers": [], "message_id": int, "category": str}}
+QUIZ_ENABLED = False  # New flag to control quiz access
+user_state = {}  # {user_id: {"current_question": int, "score": int, "start_time": float, "answers": [], "message_id": int}}
 TIMER_INTERVAL = 5  # Update timer every 5 seconds
 QUESTION_TIME = 90  # 90 seconds per question
 
@@ -44,7 +45,6 @@ def user_home_markup():
         [
             f"{question_emoji} ጥያቄ ጀምር",
             f"{feedback_emoji} መልእክት ላክ",
-            f"{leaderboard_emoji} ደረጃ ተመልከት",
         ],
         1
     )
@@ -64,14 +64,14 @@ def admin_home_markup():
 def back_markup():
     return create_buttons([f"◀️ ተመለስ"], 1)
 
-def question_markup(question_id, category):
-    questions = get_questions(category)
+def question_markup(question_id):
+    questions = get_questions()
     if question_id >= len(questions):
         return None
     question = questions[question_id]
     markup = InlineKeyboardMarkup(row_width=2)
     for i, choice in enumerate(question["choices"]):
-        markup.add(InlineKeyboardButton(f"{chr(65+i)}. {choice}", callback_data=f"answer_{question_id}_{i}_{category}"))
+        markup.add(InlineKeyboardButton(f"{chr(65+i)}. {choice}", callback_data=f"answer_{question_id}_{i}"))
     return markup
 
 def feedback_rating_markup():
@@ -80,7 +80,7 @@ def feedback_rating_markup():
 # Start command
 @bot.message_handler(commands=["start"])
 def start(message):
-    user_state[message.chat.id] = {"current_question": -1, "score": 0, "start_time": 0, "answers": [], "message_id": None, "category": None}
+    user_state[message.chat.id] = {"current_question": -1, "score": 0, "start_time": 0, "answers": [], "message_id": None}
     
     if message.chat.id in ADMINS_ID:
         bot.send_message(
@@ -95,6 +95,16 @@ def start(message):
             reply_markup=user_home_markup()
         )
 
+# Start quiz command for admins
+@bot.message_handler(commands=["startquiz"])
+def start_quiz_command(message):
+    global QUIZ_ENABLED
+    if message.chat.id in ADMINS_ID:
+        QUIZ_ENABLED = True
+        bot.reply_to(message, "✅ ጥያቄ ለተጠቃሚዎች ተከፍቷል!")
+    else:
+        bot.reply_to(message, "🚫 ይህ ትዕዛዝ ለአስተዳዳሪዎች ብቻ ነው።")
+
 # Text handler
 @bot.message_handler(content_types=["text"])
 def serve(message):
@@ -105,7 +115,7 @@ def serve(message):
         if QUIZ_ACTIVE and CURRENT_QUIZ_USER == chat_id:
             QUIZ_ACTIVE = False
             CURRENT_QUIZ_USER = None
-        user_state[chat_id] = {"current_question": -1, "score": 0, "start_time": 0, "answers": [], "message_id": None, "category": None}
+        user_state[chat_id] = {"current_question": -1, "score": 0, "start_time": 0, "answers": [], "message_id": None}
         start(message)
         return
 
@@ -121,7 +131,7 @@ def handle_admin_actions(message):
     if question_emoji + " ጥያቄ ጨምር" in text:
         bot.reply_to(
             message,
-            "ጥያቄውን በዚህ ቅርጸት ላክ:\nጥያቄ: <ጽሑፍ>\nመልሶች: <መልስ1>, <መልስ2>, <መልስ3>, <መልስ4>\nትክክለኛ መልስ: <0-3 መልስ ቁጥር>\nምድብ: <ታሪክ/ሳይንስ/ባህል/...>\nመግለጫ (ከተፈለገ): <ጽሑፍ>",
+            "ጥያቄውን በዚህ ቅርጸት ላክ:\nጥያቄ: <ጽሑፍ>\nመልሶች: <መልስ1>, <መልስ2>, <መልስ3>, <መልስ4>\nትክክለኛ መልስ: <0-3 መልስ ቁጥር>\nመግለጫ (ከተፈለገ): <ጽሑፍ>",
             reply_markup=back_markup()
         )
         user_state[chat_id]["mode"] = "add_question"
@@ -132,7 +142,7 @@ def handle_admin_actions(message):
             return
         markup = InlineKeyboardMarkup(row_width=1)
         for q in questions:
-            markup.add(InlineKeyboardButton(f"{q['category']}: {q['text']}", callback_data=f"remove_{str(q['_id'])}"))
+            markup.add(InlineKeyboardButton(f"{q['text']}", callback_data=f"remove_{str(q['_id'])}"))
         bot.reply_to(message, "የሚያስወግዱትን ጥያቄ ይምረጡ:", reply_markup=markup)
     elif leaderboard_emoji + " ውጤቶችን ተመልከት" in text:
         results = get_results()
@@ -142,7 +152,7 @@ def handle_admin_actions(message):
         sorted_results = sorted(results, key=lambda x: (-x["score"], x["time_taken"]))
         response = f"{leaderboard_emoji} ውጤቶች (በነጥብ እና ሰዓት ደረጃ):\n\n"
         for i, result in enumerate(sorted_results, 1):
-            response += f"{i}. {result['username']} (ID: {result['user_id']})\n   ነጥብ: {result['score']}/10\n   ሰዓት: {result['time_taken']:.2f} ሰከንድ\n   ምድብ: {result['category']}\n\n"
+            response += f"{i}. {result['username']} (ID: {result['user_id']})\n   ነጥብ: {result['score']}/10\n   ሰዓት: {result['time_taken']:.2f} ሰከንድ\n\n"
         bot.reply_to(message, response)
     elif feedback_emoji + " መልእክቶችን ተመልከት" in text:
         feedback = get_feedback()
@@ -162,17 +172,16 @@ def handle_admin_actions(message):
             question = lines[0].replace("ጥያቄ: ", "").strip()
             choices = lines[1].replace("መልሶች: ", "").split(", ")
             answer = int(lines[2].replace("ትክክለኛ መልስ: ", "").strip())
-            category = lines[3].replace("ምድብ: ", "").strip()
-            explanation = lines[4].replace("መግለጪያ (ከተፈለገ): ", "").strip() if len(lines) > 4 else ""
+            explanation = lines[3].replace("መግለጪያ (ከተፈለገ): ", "").strip() if len(lines) > 3 else ""
             if len(choices) != 4 or answer < 0 or answer > 3:
                 raise ValueError
-            add_question({"text": question, "choices": choices, "answer": answer, "category": category, "explanation": explanation})
+            add_question({"text": question, "choices": choices, "answer": answer, "explanation": explanation})
             bot.reply_to(message, f"{correct_emoji} ጥያቄ ተጨምሯል!", reply_markup=admin_home_markup())
             user_state[chat_id]["mode"] = None
         except:
             bot.reply_to(
                 message,
-                "ተገቢ ቅርጸት ይጠቀሙ:\nጥያቄ: <ጽሑፍ>\nመልሶች: <መልስ1>, <መልስ2>, <መልስ3>, <መልስ4>\nትክክለኛ መልስ: <0-3 መልስ ቁጥር>\nምድብ: <ታሪክ/ሳይንስ/ባህል/...>\nመግለጫ (ከተፈለገ): <ጽሑፍ>",
+                "ተገቢ ቅርጸት ይጠቀሙ:\nጥያቄ: <ጽሑፍ>\nመልሶች: <መልስ1>, <መልስ2>, <መልስ3>, <መልስ4>\nትክክለኛ መልስ: <0-3 መልስ ቁጥር>\nመግለጫ (ከተፈለገ): <ጽሑፍ>",
                 reply_markup=back_markup()
             )
 
@@ -182,6 +191,9 @@ def handle_user_actions(message):
     text = message.text
 
     if question_emoji + " ጥያቄ ጀምር" in text:
+        if not QUIZ_ENABLED:
+            bot.reply_to(message, "🚫 ጥያቄ ገና አልተከፈተም። አስተዳዳሪው እስኪጀምር ይጠብቁ።")
+            return
         questions = get_questions()
         if not questions:
             bot.reply_to(message, "ምንም ጥያቄዎች የሉም። ቆይተው ይሞክሩ።")
@@ -191,24 +203,13 @@ def handle_user_actions(message):
             return
         QUIZ_ACTIVE = True
         CURRENT_QUIZ_USER = chat_id
-        # Select a random category
-        categories = list(set(q["category"] for q in questions))
-        category = categories[0]  # Simplify: use first category
-        user_state[chat_id] = {"current_question": 0, "score": 0, "start_time": time.time(), "answers": [], "message_id": None, "category": category}
-        send_question(chat_id, 0, category)
+        user_state[chat_id] = {"current_question": 0, "score": 0, "start_time": time.time(), "answers": [], "message_id": None}
+        send_question(chat_id, 0)
     elif feedback_emoji + " መልእክት ላክ" in text:
         user_state[chat_id]["mode"] = "feedback"
         bot.reply_to(message, "መልእክትህን ላክ እና ደረጃ ስጥ:", reply_markup=feedback_rating_markup())
     elif leaderboard_emoji + " ደረጃ ተመልከት" in text:
-        results = get_results()
-        if not results:
-            bot.reply_to(message, "ምንም ውጤቶች የሉም።")
-            return
-        sorted_results = sorted(results, key=lambda x: (-x["score"], x["time_taken"]))
-        response = f"{leaderboard_emoji} ዕለታዊ ደረጃ:\n\n"
-        for i, result in enumerate(sorted_results[:5], 1):  # Top 5
-            response += f"{i}. {result['username']} - {result['score']}/10 ({result['time_taken']:.2f} ሰከንድ)\n"
-        bot.reply_to(message, response)
+        bot.reply_to(message, "🚫 ይህ ተግባር ለአስተዳዳሪዎች ብቻ ነው።")
     elif user_state.get(chat_id, {}).get("mode") == "feedback":
         try:
             rating = int(message.text[0]) if message.text[0].isdigit() else 1
@@ -225,8 +226,8 @@ def handle_user_actions(message):
         except:
             bot.reply_to(message, "እባክህ ደረጃ (1-5) እና መልእክት ላክ:", reply_markup=feedback_rating_markup())
 
-def send_question(chat_id, question_idx, category):
-    questions = get_questions(category)
+def send_question(chat_id, question_idx):
+    questions = get_questions()
     if question_idx >= 10 or question_idx >= len(questions):
         end_quiz(chat_id)
         return
@@ -234,64 +235,62 @@ def send_question(chat_id, question_idx, category):
     time_remaining = QUESTION_TIME
     message = bot.send_message(
         chat_id,
-        f"{question_emoji} ጥያቄ {question_idx + 1}/10 ({category}):\n{question['text']}\n\n{timer_emoji} ቀሪ ሰዓት: {time_remaining} ሰከንድ",
-        reply_markup=question_markup(question_idx, category)
+        f"{question_emoji} ጥያቄ {question_idx + 1}/10:\n{question['text']}\n\n{timer_emoji} ቀሪ ሰዓት: {time_remaining} ሰከንድ",
+        reply_markup=question_markup(question_idx)
     )
     user_state[chat_id]["message_id"] = message.message_id
     user_state[chat_id]["current_question"] = question_idx
     # Start timer
-    threading.Timer(0, update_timer, args=(chat_id, question_idx, category, time.time())).start()
-    threading.Timer(QUESTION_TIME, lambda: next_question(chat_id, question_idx, category)).start()
+    threading.Timer(0, update_timer, args=(chat_id, question_idx, time.time())).start()
+    threading.Timer(QUESTION_TIME, lambda: next_question(chat_id, question_idx)).start()
 
-def update_timer(chat_id, question_idx, category, start_time):
+def update_timer(chat_id, question_idx, start_time):
     if chat_id not in user_state or user_state[chat_id]["current_question"] != question_idx:
         return
     elapsed = time.time() - start_time
     remaining = max(0, QUESTION_TIME - elapsed)
     if remaining <= 0:
         return
-    questions = get_questions(category)
+    questions = get_questions()
     if question_idx >= len(questions):
         return
     question = questions[question_idx]
     try:
         bot.edit_message_text(
-            f"{question_emoji} ጥያቄ {question_idx + 1}/10 ({category}):\n{question['text']}\n\n{timer_emoji} ቀሪ ሰዓት: {int(remaining)} ሰከንድ",
+            f"{question_emoji} ጥያቄ {question_idx + 1}/10:\n{question['text']}\n\n{timer_emoji} ቀሪ ሰዓት: {int(remaining)} ሰከንድ",
             chat_id=chat_id,
             message_id=user_state[chat_id]["message_id"],
-            reply_markup=question_markup(question_idx, category)
+            reply_markup=question_markup(question_idx)
         )
-        threading.Timer(TIMER_INTERVAL, update_timer, args=(chat_id, question_idx, category, start_time)).start()
+        threading.Timer(TIMER_INTERVAL, update_timer, args=(chat_id, question_idx, start_time)).start()
     except:
         pass  # Message not modified (e.g., deleted)
 
-def next_question(chat_id, current_idx, category):
+def next_question(chat_id, current_idx):
     if chat_id not in user_state or user_state[chat_id]["current_question"] != current_idx:
         return
     user_state[chat_id]["current_question"] += 1
-    send_question(chat_id, user_state[chat_id]["current_question"], category)
+    send_question(chat_id, user_state[chat_id]["current_question"])
 
 def end_quiz(chat_id):
     global QUIZ_ACTIVE, CURRENT_QUIZ_USER
     score = user_state[chat_id]["score"]
     time_taken = time.time() - user_state[chat_id]["start_time"]
-    category = user_state[chat_id]["category"]
     add_result({
         "user_id": chat_id,
         "username": bot.get_chat(chat_id).username or bot.get_chat(chat_id).first_name,
         "score": score,
         "time_taken": time_taken,
-        "category": category,
         "timestamp": datetime.now().isoformat()
     })
     bot.send_message(
         chat_id,
-        f"🎉 ጥያቄ ተጠናቋል!\nነጥብህ: {score}/10\nሰዓት: {time_taken:.2f} ሰከንድ\nምድብ: {category}",
+        f"🎉 ጥያቄ ተጠናቋል!\nነጥብህ: {score}/10\nሰዓት: {time_taken:.2f} ሰከንድ",
         reply_markup=user_home_markup()
     )
     QUIZ_ACTIVE = False
     CURRENT_QUIZ_USER = None
-    user_state[chat_id] = {"current_question": -1, "score": 0, "start_time": 0, "answers": [], "message_id": None, "category": None}
+    user_state[chat_id] = {"current_question": -1, "score": 0, "start_time": 0, "answers": [], "message_id": None}
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
@@ -299,12 +298,12 @@ def handle_callback(call):
     questions = get_questions()
     
     if call.data.startswith("answer_"):
-        _, question_id, choice_idx, category = call.data.split("_")
+        _, question_id, choice_idx = call.data.split("_")
         question_id = int(question_id)
         choice_idx = int(choice_idx)
         if chat_id not in user_state or user_state[chat_id]["current_question"] != question_id:
             return
-        questions = get_questions(category)
+        questions = get_questions()
         if question_id >= len(questions):
             return
         question = questions[question_id]
@@ -320,7 +319,7 @@ def handle_callback(call):
             bot.send_message(chat_id, f"📚 መግለጫ: {explanation}")
         bot.delete_message(chat_id, call.message.message_id)
         user_state[chat_id]["current_question"] += 1
-        send_question(chat_id, user_state[chat_id]["current_question"], category)
+        send_question(chat_id, user_state[chat_id]["current_question"])
     elif call.data.startswith("remove_"):
         question_id = call.data.split("_")[1]
         remove_question(question_id)
