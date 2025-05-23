@@ -346,7 +346,7 @@ def health_check():
 def main():
     bot.remove_webhook()
     DOMAIN = "gibigubae.onrender.com"
-WEBHOOK_URL = f"https://{DOMAIN}/{API}"
+    WEBHOOK_URL = f"https://{DOMAIN}/{API}"
     bot.set_webhook(url=WEBHOOK_URL)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8443)))
 
