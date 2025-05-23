@@ -10,7 +10,7 @@ import os
 import isoweek
 
 # Bot configuration
-API = os.environ.get("TELEGRAM_BOT_TOKEN")  # Use environment variable
+API = os.environ.get("TELEGRAM_BOT_TOKEN")
 if not API:
     raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set")
 bot = telebot.TeleBot(API)
@@ -29,13 +29,13 @@ incorrect_emoji = "❌"
 star_emoji = "⭐"
 
 # Global state
-ADMINS_ID = [6473677687]  # Add your Telegram ID
+ADMINS_ID = [6473677687]
 QUIZ_ACTIVE = False
 CURRENT_QUIZ_USER = None
 QUIZ_ENABLED = False  # Controls access to new questions
 user_state = {}  # {user_id: {"current_question": int, "score": int, "start_time": float, "answers": [], "message_id": int, "week_category": str}}
-TIMER_INTERVAL = 5  # Update timer every 5 seconds
-QUESTION_TIME = 90  # 90 seconds per question
+TIMER_INTERVAL = 5
+QUESTION_TIME = 90
 
 # Initialize database
 init_db()
@@ -66,7 +66,9 @@ def back_markup():
     return create_buttons([f"◀️ ተመለስ"], 1)
 
 def question_type_markup():
-    buttons = [f"{question_emoji} አዲስ ጥያቄዎች"] if QUIZ_ENABLED else []
+    buttons = []
+    if QUIZ_ENABLED:
+        buttons.append(f"{question_emoji} አዲስ ጥያቄዎች")
     buttons.append(f"{question_emoji} አሮጌ ጥያቄዎች")
     return create_buttons(buttons, 1)
 
@@ -83,11 +85,10 @@ def question_markup(question_id, week_category):
 def feedback_rating_markup():
     return create_buttons([f"{i}{star_emoji}" for i in range(1, 6)], 5)
 
-# Start command
+# Command handlers
 @bot.message_handler(commands=["start"])
 def start(message):
     user_state[message.chat.id] = {"current_question": -1, "score": 0, "start_time": 0, "answers": [], "message_id": None, "week_category": None}
-    
     if message.chat.id in ADMINS_ID:
         bot.send_message(
             message.chat.id,
@@ -101,24 +102,38 @@ def start(message):
             reply_markup=user_home_markup()
         )
 
-# Start quiz command for admins
 @bot.message_handler(commands=["startquiz"])
 def start_quiz_command(message):
     global QUIZ_ENABLED
     if message.chat.id in ADMINS_ID:
         QUIZ_ENABLED = True
-        bot.reply_to(message, "✅ አዲስ ጥያቄዎች ለተጠቃሚዎች ተከፍቷል!")
+        current_week = datetime.now().isocalendar()[1]
+        week_category = f"Week {current_week}"
+        questions = get_questions(week_category)
+        if not questions:
+            bot.reply_to(message, f"🚫 ለ{week_category} ምንም ጥያቄዎች የሉም። እባክዎ መጀመሪያ ጥያቄዎችን ያክሉ።")
+            QUIZ_ENABLED = False
+            return
+        bot.reply_to(message, f"✅ አዲስ ጥያቄዎች ({week_category}) ለተጠቃሚዎች ተከፍቷል!")
     else:
         bot.reply_to(message, "🚫 ይህ ትዕዛዝ ለአስተዳዳሪዎች ብቻ ነው።")
 
-# Enough command to move new questions to old
-@bot.message_handler(commands=["enough"])
-def enough_command(message):
+@bot.message_handler(commands=["stopquiz"])
+def stop_quiz_command(message):
+    global QUIZ_ENABLED, QUIZ_ACTIVE, CURRENT_QUIZ_USER
     if message.chat.id in ADMINS_ID:
+        if not QUIZ_ENABLED:
+            bot.reply_to(message, "🚫 ምንም ንቁ ጥያቄ የለም።")
+            return
+        QUIZ_ENABLED = False
+        if QUIZ_ACTIVE and CURRENT_QUIZ_USER:
+            bot.send_message(CURRENT_QUIZ_USER, "🚫 ጥያቄው በአስተዳዳሪ ተቋርጧል።", reply_markup=user_home_markup())
+            QUIZ_ACTIVE = False
+            CURRENT_QUIZ_USER = None
         current_week = datetime.now().isocalendar()[1]
         week_category = f"Week {current_week}"
         move_questions_to_old(week_category)
-        bot.reply_to(message, f"✅ የ{week_category} ጥያቄዎች ወደ አሮጌ ጥያቄዎች ተዛውረዋል!")
+        bot.reply_to(message, f"✅ ጥያቄ ተቋርጧል እና የ{week_category} ጥ�ياቄዎች ወደ አሮጌ ጥ�ياቄዎች ተዛውረዋል!")
     else:
         bot.reply_to(message, "🚫 ይህ ትዕዛዝ ለአስተዳዳሪዎች ብቻ ነው።")
 
@@ -169,7 +184,7 @@ def handle_admin_actions(message):
         sorted_results = sorted(results, key=lambda x: (-x["score"], x["time_taken"]))
         response = f"{leaderboard_emoji} ውጤቶች (በነጥብ እና ሰዓት ደረጃ):\n\n"
         for i, result in enumerate(sorted_results, 1):
-            response += f"{i}. {result['username']} (ID: {result['user_id']})\n   ነጥብ: {result['score']}/10\n   ሰዓት: {result['time_taken']:.2f} ሰከንድ\n\n"
+            response += f"{i}. {result['username']} (ID: {result['user_id']})\n   ነጥብ: {result['score']}/10\n   ሰዓት: {result['time_taken']:.2f} ሰከንድ\n   ምድብ: {result['week_category']}\n\n"
         bot.reply_to(message, response)
     elif feedback_emoji + " መልእክቶችን ተመልከት" in text:
         feedback = get_feedback()
@@ -210,12 +225,12 @@ def handle_user_actions(message):
     text = message.text
 
     if question_emoji + " ጥያቄ ጀምር" in text:
+        if QUIZ_ACTIVE:
+            bot.reply_to(message, "🚫 ጥያቄ እየተካሄደ ነው። ቀጣዩን ዙር ይጠብቁ።")
+            return
         questions = get_questions()
         if not questions:
             bot.reply_to(message, "ምንም ጥያቄዎች የሉም። ቆይተው ይሞክሩ።")
-            return
-        if QUIZ_ACTIVE:
-            bot.reply_to(message, "ጥያቄ እየተካሄደ ነው። ቀጣዩን ዙር ይጠብቁ።")
             return
         bot.reply_to(message, "የትኛውን ጥያቄ መጀመር ይፈልጋሉ?", reply_markup=question_type_markup())
         user_state[chat_id]["mode"] = "select_question_type"
@@ -247,8 +262,6 @@ def handle_user_actions(message):
     elif feedback_emoji + " መልእክት ላክ" in text:
         user_state[chat_id]["mode"] = "feedback"
         bot.reply_to(message, "መልእክትህን ላክ እና ደረጃ ስጥ:", reply_markup=feedback_rating_markup())
-    elif leaderboard_emoji + " ደረጃ ተመልከት" in text:
-        bot.reply_to(message, "🚫 ይህ ተግባር ለአስተዳዳሪዎች ብቻ ነው።")
     elif user_state.get(chat_id, {}).get("mode") == "feedback":
         try:
             rating = int(message.text[0]) if message.text[0].isdigit() else 1
@@ -279,7 +292,6 @@ def send_question(chat_id, question_idx, week_category):
     )
     user_state[chat_id]["message_id"] = message.message_id
     user_state[chat_id]["current_question"] = question_idx
-    # Start timer
     threading.Timer(0, update_timer, args=(chat_id, question_idx, week_category, time.time())).start()
     threading.Timer(QUESTION_TIME, lambda: next_question(chat_id, question_idx, week_category)).start()
 
@@ -296,14 +308,14 @@ def update_timer(chat_id, question_idx, week_category, start_time):
     question = questions[question_idx]
     try:
         bot.edit_message_text(
-            f"{question_emoji} ጥያቄ {question_idx + 1}/10 ({week_category}):\n{question['text']}\n\n{timer_emoji} ቀሪ ሰዓቴ: {int(remaining)} ሰከንድ",
+            f"{question_emoji} ጥያቄ {question_idx + 1}/10 ({week_category}):\n{question['text']}\n\n{timer_emoji} ቀሪ ሰዓት: {int(remaining)} ሰከንድ",
             chat_id=chat_id,
             message_id=user_state[chat_id]["message_id"],
             reply_markup=question_markup(question_idx, week_category)
         )
         threading.Timer(TIMER_INTERVAL, update_timer, args=(chat_id, question_idx, week_category, start_time)).start()
     except:
-        pass  # Message not modified (e.g., deleted)
+        pass
 
 def next_question(chat_id, current_idx, week_category):
     if chat_id not in user_state or user_state[chat_id]["current_question"] != current_idx:
@@ -336,7 +348,6 @@ def end_quiz(chat_id):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     chat_id = call.message.chat.id
-    questions = get_questions()
     
     if call.data.startswith("answer_"):
         _, question_id, choice_idx, week_category = call.data.split("_")
@@ -377,12 +388,10 @@ def webhook():
         return '', 200
     return '', 400
 
-# Health check endpoint for debugging
 @app.route('/')
 def health_check():
     return "Bot is running!", 200
 
-# Main function to set webhook and start Flask
 def main():
     bot.remove_webhook()
     DOMAIN = "gibigubae.onrender.com"
